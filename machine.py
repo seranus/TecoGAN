@@ -1,5 +1,6 @@
 import numpy as np
 import os, math, time, collections, numpy as np
+import argparse
 ''' TF_CPP_MIN_LOG_LEVEL
 0 = all messages are logged (default behavior)
 1 = INFO messages are not printed
@@ -146,39 +147,9 @@ def printVariable(scope, key = tf.GraphKeys.MODEL_VARIABLES):
         total_sz += np.prod(k[1])
     print("total size: %d" %total_sz)
     
-def preexec(): # Don't forward signals.
-    os.setpgrp()
     
-def testWhileTrain(FLAGS, testno = 0):
-    '''
-        this function is called during training, Hard-Coded!!
-        to try the "inference" mode when a new model is saved.
-        The code has to be updated from machine to machine...
-        depending on python, and your training settings
-    '''
-    desstr = os.path.join(FLAGS.output_dir, 'train/') # saving in the ./train/ directory
-    cmd1 = ["python3", "main.py", # never tested with python2...
-        "--output_dir", desstr, 
-        "--summary_dir", desstr,
-        "--mode","inference",
-        "--num_resblock", "%d"%FLAGS.num_resblock,
-        "--checkpoint", os.path.join(FLAGS.output_dir, 'model-%d'%testno),
-        "--cudaID", FLAGS.cudaID]
-    # a folder for short test 
-    cmd1 += ["--input_dir_LR", "./LR/calendar/", # update the testing sequence
-             "--output_pre", "", # saving in train folder directly
-             "--output_name", "%09d"%testno, # name
-             "--input_dir_len", "10",]
-    print('[testWhileTrain] step %d:'%testno)
-    print(' '.join(cmd1))
-    # ignore signals
-    return subprocess.Popen(cmd1, preexec_fn = preexec)
-    
-if False: # If you want to take a look of the configuration, True
-    print_configuration_op(FLAGS)
-
 # the inference mode (just perform super resolution on the input image)
-if FLAGS.mode == 'inference':
+def inference():
     if FLAGS.checkpoint is None:
         raise ValueError('The checkpoint file is needed to performing the test.')
 
@@ -273,163 +244,22 @@ if FLAGS.mode == 'inference':
             else:# First 5 is a hard-coded symmetric frame padding, ignored but time added!
                 print("Warming up %d"%(5-i))
     print( "total time " + str(srtime) + ", frame number " + str(max_iter) )
-        
-# The training mode
-elif FLAGS.mode == 'train':
-    # hard coded save
-    filelist = ['main.py','lib/Teco.py','lib/frvsr.py','lib/dataloader.py','lib/ops.py']
-    for filename in filelist:
-        shutil.copyfile('./' + filename, FLAGS.summary_dir + filename.replace("/","_"))
-        
-    useValidat = tf.placeholder_with_default( tf.constant(False, dtype=tf.bool), shape=() )
-    rdata = frvsr_gpu_data_loader(FLAGS, useValidat)
-    # Data = collections.namedtuple('Data', 'paths_HR, s_inputs, s_targets, image_count, steps_per_epoch')
-    print('tData count = %d, steps per epoch %d' % (rdata.image_count, rdata.steps_per_epoch))
-    if (FLAGS.ratio>0):
-        Net = TecoGAN( rdata.s_inputs, rdata.s_targets, FLAGS )
-    else:
-        Net = FRVSR( rdata.s_inputs, rdata.s_targets, FLAGS )
-    # Network = collections.namedtuple('Network', 'gen_output, train, learning_rate, update_list, '
-    #                                     'update_list_name, update_list_avg, image_summary')
-    
-    # Add scalar summary
-    tf.summary.scalar('learning_rate', Net.learning_rate)
-    train_summary = []
-    for key, value in zip(Net.update_list_name, Net.update_list_avg):
-        # 'map_loss, scale_loss, FrameA_loss, FrameA_loss,...'
-        train_summary += [tf.summary.scalar(key, value)]
-    train_summary += Net.image_summary
-    merged = tf.summary.merge(train_summary)
-    
-    validat_summary = [] # val data statistics is not added to average
-    uplen = len(Net.update_list)
-    for key, value in zip(Net.update_list_name[:uplen], Net.update_list):
-        # 'map_loss, scale_loss, FrameA_loss, FrameA_loss,...'
-        validat_summary += [tf.summary.scalar("val_" + key, value)]
-    val_merged = tf.summary.merge(validat_summary)
 
-    # Define the saver and weight initiallizer
-    saver = tf.train.Saver(max_to_keep=50)
-    # variable lists
-    all_var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-    tfflag = tf.GraphKeys.MODEL_VARIABLES #tf.GraphKeys.TRAINABLE_VARIABLES
-    
-    if (FLAGS.checkpoint is not None) and (FLAGS.pre_trained_model is True):
-        model_var_list = tf.get_collection(tfflag, scope='generator') + tf.get_collection(tfflag, scope='fnet')
-        assign_ops = get_existing_from_ckpt(FLAGS.checkpoint, model_var_list, rest_zero=True, print_level=1)
-        print('Prepare to load %d weights from the pre-trained model for generator and fnet'%len(assign_ops))
-        if FLAGS.ratio>0:
-            model_var_list = tf.get_collection(tfflag, scope='tdiscriminator')
-            dis_list = get_existing_from_ckpt(FLAGS.checkpoint, model_var_list, print_level=0)
-            print('Prepare to load %d weights from the pre-trained model for discriminator'%len(dis_list))
-            assign_ops += dis_list
-        
-    if FLAGS.vgg_scaling > 0.0: # VGG weights are not trainable
-        vgg_var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='vgg_19')
-        vgg_restore = tf.train.Saver(vgg_var_list)
-    
-    print('Finish building the network.')
-    
-    # Start the session
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    # init_op = tf.initialize_all_variables() # MonitoredTrainingSession will initialize automatically
-    with tf.train.MonitoredTrainingSession(config=config, save_summaries_secs=None, save_checkpoint_secs=None) as sess:
-        train_writer = tf.summary.FileWriter(FLAGS.summary_dir, sess.graph)
-        
-        printVariable('generator')
-        printVariable('fnet')
-        if FLAGS.ratio>0:
-            printVariable('tdiscriminator')
-                
-        if FLAGS.vgg_scaling > 0.0:
-            printVariable('vgg_19', tf.GraphKeys.GLOBAL_VARIABLES)
-            vgg_restore.restore(sess, FLAGS.vgg_ckpt)
-            print('VGG19 restored successfully!!')
-                
-        if (FLAGS.checkpoint is not None):
-            if (FLAGS.pre_trained_model is False):
-                print('Loading everything from the checkpoint to continue the training...')
-                saver.restore(sess, FLAGS.checkpoint)
-                # this will restore everything, including ADAM training parameters and global_step
-            else:
-                print('Loading weights from the pre-trained model to start a new training...')
-                sess.run(assign_ops) # only restore existing model weights
-            
-        print('The first run takes longer time for training data loading...')
-        # get the session for save
-        _sess = sess
-        while type(_sess).__name__ != 'Session':
-            # pylint: disable=W0212
-            _sess = _sess._sess
-        save_sess = _sess
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_folder', type=str, required=True, help='Input frame folder')
+    parser.add_argument('output_folder', type=str, required=True, help='Output frame folder')
+    parser.add_argument('--cuda_id', type=str, default='0', help='GPU id')
+    args = parser.parse_args()
 
-        if 1:
-            print('Save initial checkpoint, before any training')
-            init_run_no = sess.run(Net.global_step)
-            saver.save(save_sess, os.path.join(FLAGS.output_dir, 'model'), global_step=init_run_no)
-            testWhileTrain(FLAGS, init_run_no) # make sure that testWhileTrain works
-        
-        # Performing the training
-        frame_len = (FLAGS.RNN_N*2-1) if FLAGS.pingpang else FLAGS.RNN_N
-        max_iter, step, start = FLAGS.max_iter, 0, time.time()
-        if max_iter is None:
-            if FLAGS.max_epoch is None:
-                raise ValueError('one of max_epoch or max_iter should be provided')
-            else:
-                max_iter = FLAGS.max_epoch * rdata.steps_per_epoch
-        try:
-            for step in range(max_iter):
-                run_step = sess.run(Net.global_step) + 1
-                fetches = { "train": Net.train, "learning_rate": Net.learning_rate }
-            
-                if (run_step % FLAGS.display_freq) == 0:
-                    for key, value in zip(Net.update_list_name, Net.update_list_avg):
-                        fetches[str(key)] = value
-                if (run_step % FLAGS.summary_freq) == 0:
-                    fetches["summary"] = merged
-                    
-                results = sess.run(fetches)
-                if(step == 0):
-                    print('Optimization starts!!!(Ctrl+C to stop, will try saving the last model...)')
-                
-                if (run_step % FLAGS.summary_freq) == 0:
-                    print('Run and Recording summary!!')
-                    train_writer.add_summary(results['summary'], run_step)
-                    val_fetches = {}
-                    for name, value in zip(Net.update_list_name[:uplen], Net.update_list):
-                        val_fetches['val_' + name] = value
-                    val_fetches['summary'] = val_merged
-                    val_results = sess.run(val_fetches, feed_dict={useValidat: True})
-                    train_writer.add_summary(val_results['summary'], run_step)
-                    print('-----------Validation data scalars-----------')
-                    for name in Net.update_list_name[:uplen]:
-                        print('val_' + name, val_results['val_' + name])
-                        
-                if (run_step % FLAGS.display_freq) == 0:
-                    train_epoch = math.ceil(run_step / rdata.steps_per_epoch)
-                    train_step = (run_step - 1) % rdata.steps_per_epoch + 1
-                    rate = (step + 1) * FLAGS.batch_size / (time.time() - start)
-                    remaining = (max_iter - step) * FLAGS.batch_size / rate
-                    print("progress  epoch %d  step %d  image/sec %0.1fx%02d  remaining %dh%dm" % 
-                        (train_epoch, train_step, rate, frame_len, 
-                        remaining // 3600, (remaining%3600) // 60))
-                        
-                    print("global_step", run_step)
-                    print("learning_rate", results['learning_rate'])
-                    for name in Net.update_list_name:
-                        print(name, results[name])
-                        
-                if (run_step % FLAGS.save_freq) == 0:
-                    print('Save the checkpoint')
-                    saver.save(save_sess, os.path.join(FLAGS.output_dir, 'model'), global_step=int(run_step))
-                    testWhileTrain(FLAGS, run_step)
-                
-        except KeyboardInterrupt:
-            if step > 1:
-                print('main.py: KeyboardInterrupt->saving the checkpoint')
-                saver.save(save_sess, os.path.join(FLAGS.output_dir, 'model'), global_step=int(run_step))
-                testWhileTrain(FLAGS, run_step).communicate()
-            print('main.py: quit')
-            exit()
-        print('Optimization done!!!!!!!!!!!!')
+    Flags.input_dir_LR = args.input_folder
+    Flags.output_dir = args.output_folder
+    Flags.cudaID = args.cuda_id
+
+    # defaults
+    Flags.num_resblock = '16'
+    Flags.output_ext = 'png'
+    Flags.mode = 'inference'
+    Flags.checkpoint = './model/TecoGAN'
+
+    inference()

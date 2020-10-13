@@ -17,6 +17,7 @@ def preexec(): # Don't forward signals.
     os.setpgrp()
     
 def mycall(cmd, block=False):
+    print (cmd)
     if not block:
         return subprocess.Popen(cmd)
     else:
@@ -73,7 +74,7 @@ elif( runcase == 1 ): # inference a trained model
     
     # run these test cases one by one:
     for nn in range(len(testpre)):
-        cmd1 = ["python3", "main.py",
+        cmd1 = ["python", "main.py",
             "--cudaID", "0",            # set the cudaID here to use only one GPU
             "--output_dir",  dirstr,    # Set the place to put the results.
             "--summary_dir", os.path.join(dirstr, 'log/'), # Set the place to put the log. 
@@ -97,7 +98,7 @@ elif( runcase == 2 ): # calculate all metrics, and save the csv files, should us
 
     tar_list = [(tarstr+_) for _ in testpre]
     out_list = [(dirstr+_) for _ in testpre]
-    cmd1 = ["python3", "metrics.py",
+    cmd1 = ["python", "metrics.py",
         "--output", dirstr+"metric_log/",
         "--results", ",".join(out_list),
         "--targets", ",".join(tar_list),
