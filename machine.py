@@ -12,6 +12,7 @@ import tensorflow as tf
 from tensorflow.python.util import deprecation
 deprecation._PRINT_DEPRECATION_WARNINGS = False
 import random as rn
+from tqdm import tqdm
 
 # fix all randomness, except for multi-treading or GPU process
 os.environ['PYTHONHASHSEED'] = '0'
@@ -103,6 +104,10 @@ Flags.DEFINE_float('Dbalance', 0.4, 'An adaptive balancing for Discriminators')
 Flags.DEFINE_float('crop_dt', 0.75, 'factor of dt crop') # dt input size = crop_size*crop_dt
 Flags.DEFINE_boolean('D_LAYERLOSS', True, 'Whether use layer loss from D')
 
+# placeholder for my params
+Flags.DEFINE_string('input_folder', None, '')
+Flags.DEFINE_string('output_folder', None, '')
+
 FLAGS = Flags.FLAGS
 
 # Set CUDA devices correctly if you use multiple gpu system
@@ -114,14 +119,14 @@ np.random.seed(my_seed)
 tf.set_random_seed(my_seed)
 
 # Check the output_dir is given
-if FLAGS.output_dir is None:
-    raise ValueError('The output directory is needed')
+# if FLAGS.output_dir is None:
+#    raise ValueError('The output directory is needed')
 # Check the output directory to save the checkpoint
-if not os.path.exists(FLAGS.output_dir):
-    os.mkdir(FLAGS.output_dir)
+# if not os.path.exists(FLAGS.output_dir):
+#    os.mkdir(FLAGS.output_dir)
 # Check the summary directory to save the event
-if FLAGS.summary_dir is not None and not os.path.exists(FLAGS.summary_dir):
-    os.mkdir(FLAGS.summary_dir)
+# if FLAGS.summary_dir is not None and not os.path.exists(FLAGS.summary_dir):
+#    os.mkdir(FLAGS.summary_dir)
 
 # custom Logger to write Log to file
 class Logger(object):
@@ -222,7 +227,7 @@ def inference():
                 
         srtime = 0
         print('Frame evaluation starts!!')
-        for i in range(max_iter):
+        for i in tqdm(range(max_iter)):
             input_im = np.array([inference_data.inputs[i]]).astype(np.float32)
             feed_dict={inputs_raw: input_im}
             t0 = time.time()
@@ -247,19 +252,20 @@ def inference():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('input_folder', type=str, required=True, help='Input frame folder')
-    parser.add_argument('output_folder', type=str, required=True, help='Output frame folder')
+    parser.add_argument('--input_folder', type=str, required=True, help='Input frame folder')
+    parser.add_argument('--output_folder', type=str, required=True, help='Output frame folder')
     parser.add_argument('--cuda_id', type=str, default='0', help='GPU id')
     args = parser.parse_args()
 
-    Flags.input_dir_LR = args.input_folder
-    Flags.output_dir = args.output_folder
-    Flags.cudaID = args.cuda_id
+    FLAGS.input_dir_LR = args.input_folder
+    FLAGS.output_dir = args.output_folder
+    FLAGS.cudaID = args.cuda_id
+    os.environ["CUDA_VISIBLE_DEVICES"]=FLAGS.cudaID 
 
     # defaults
-    Flags.num_resblock = '16'
-    Flags.output_ext = 'png'
-    Flags.mode = 'inference'
-    Flags.checkpoint = './model/TecoGAN'
+    FLAGS.num_resblock = 16
+    FLAGS.output_ext = 'png'
+    FLAGS.mode = 'inference'
+    FLAGS.checkpoint = './model/TecoGAN'
 
     inference()

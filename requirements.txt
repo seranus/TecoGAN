@@ -6,3 +6,4 @@ pandas>=0.23.1
 Keras==2.1.2
 opencv-python>=2.4.11
 ipython>=7.4.0
+tqdm
