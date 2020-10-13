@@ -103,8 +103,7 @@ venv.bak/
 .mypy_cache/
 
 # others
-# TecoGAN model
-model
+
 # inputs
 LR
 # outputs
